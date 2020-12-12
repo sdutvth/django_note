@@ -30,9 +30,9 @@
 
 ### 图形化界面创建(利用Pycharm专业版)
 
-<img src="C:\Users\bjfuvth\AppData\Roaming\Typora\typora-user-images\image-20201209131555142.png" alt="image-20201209131555142" style="zoom:80%;" />
+![](https://raw.githubusercontent.com/sdutvth/django_note/main/images/1.png)
 
-![image-20201209131754443](C:\Users\bjfuvth\AppData\Roaming\Typora\typora-user-images\image-20201209131754443.png)
+![](https://raw.githubusercontent.com/sdutvth/django_note/main/images/2.png)
 
 但pycharm部分版本创建出来的django是有问题的。
 
