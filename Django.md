@@ -58,3 +58,8 @@
 
 `127.0.0.1:22222`就能访问到我们创建的项目了。
 
+### pycharm图形化界面启动
+
+pycharm代码区上面有个绿色标志，点就完事了。
+
+![](https://raw.githubusercontent.com/sdutvth/django_note/main/images/3.png)
