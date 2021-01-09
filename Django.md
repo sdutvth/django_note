@@ -369,6 +369,34 @@ ok，run一下：
 
 我们发现可以正常工作。搞定了。
 
+注意哈，django推荐在路由分发时，把分隔符`/`写在上一级路由的末尾，而不是下一级的开头。所以我们按照django推荐的方式写代码就变成了：
+
+test_django/test_django/urls.py
+
+```python
+from django.contrib import admin
+from django.urls import path, re_path, include
+
+
+urlpatterns = [
+    path('admin/', admin.site.urls),
+    # include的字符串其实就是app目录名.下面的urls.py
+    path('app01/', include('test_app.urls'))
+]
+```
+
+urls.py
+
+```python
+from django.urls import path
+from .views.index import index
+urlpatterns = [
+    path('index', index)
+]
+```
+
+
+
 ### 别名反向生成URL
 
 #### 作用
@@ -504,3 +532,826 @@ urlpatterns = [
 #### 本质
 
 一定要记得反向生成URL的本质，方便，方便，方便。思路就是C语言的define定义一个全局的量。只不过django都帮我们做好了，包括动态路由之类的操作。
+
+
+
+
+
+## DjangoORM
+
+### ORM的功能
+
+1. 操作表 - (创建表、修改表、删除表)， 其中修改表包括修改表结构、表数据类型。
+2. 操作数据行 - (增删改查)
+
+### DjangoORM的特点
+
+- 没有提供链接mysql的能力，故需要用三方库(MySQLdb, pymysql等)连接数据库。我们一般用pymysql。它比MySQLdb(django默认连接的第三方连数据库的工具)好用很多。
+-  djangoORM只能操作表和操作数据行，并没有操作数据库的能力。所以我们要自己手动创建好数据库让djangoORM去连接。
+
+### DjangoORM初始化步骤
+
+1. 在工程目录，本例中即为`test_django/test_django/`下的`__init__.py`文件中，写入以下代码：
+
+   ```python
+   import pymysql
+   # 此举是设置一个虚假的pymysql版本号，骗过django，因为django3.x不能用较低版本的pymysql了
+   pymysql.version_info = (1, 4, 13, "final", 0)
+   pymysql.install_as_MySQLdb()
+   ```
+
+   此举是用pymysql为django提供连接数据库的能力。
+
+2. 创建数据库 - (navicat和命令行创建均可)。
+
+3. 配置数据库到django的项目配置文件settings.py中。
+
+   ```python
+   DATABASES = {
+       'default': {
+           'ENGINE': 'django.db.backends.mysql',
+           'NAME': 'test_django', # 刚创建的数据库名称
+           'USER': 'root', # 用户名
+           'PASSWORD': '', # 密码
+           'HOST': '', # mysql的部署机器ip, 默认为localhost
+           'PORT': '' # mysql的端口号，默认为3306
+       }
+   }
+   ```
+
+到此，djangoORM的初始化已经搞定了。
+
+### DjangoORM的相关概念
+
+Django的ORM, 其本质上是用操作类和对象的方式来操作数据库。
+
+在ORM的世界里，类对应着某张数据表；对象对应着表中的某条记录。
+
+外键通常是设置在"一对多"关系中"多"的一边。在django的orm中，表示外键的成员对应的不是一个字段，而是一条记录(即对应着"一"中的一条记录)。但在数据库表中会生成一个外键对应的字段。
+
+### DjangoORM建单表步骤                                                                                                                                                                                                                                                                                                                 
+
+1. 创建一个类，此类必须继承自models.Model类。
+
+   1. 类中的成员变量代表了表中的字段。
+   2. 类中的外键指向另外一个类的对象。
+   3. 下面是代码。代码中给出了一些djangoORM的规则。
+      1. 如果不设置主键,DjangoORM会自动新增一列id, 自增，默认为主键。
+      2. 对于CharField来说，max_length参数是必须有的。
+   
+   ```python
+   from django.db import models
+   
+   class UserInfo(models.Model):
+       # 显式指定了主键
+       nid = models.BigAutoField(primary_key=True)
+    # 相当于数据库中的varchar, 所以必须制定max_length
+       username = models.CharField(max_length=32)
+       password = models.CharField(max_length=64)
+   ```
+   
+2. 去settings.py中将创建类的那个app注册在settings.py中。
+
+   ```python
+   INSTALLED_APPS = [
+       'django.contrib.admin',
+       'django.contrib.auth',
+       'django.contrib.contenttypes',
+       'django.contrib.sessions',
+       'django.contrib.messages',
+       'django.contrib.staticfiles',
+       'test_app' # 我们新增的app
+   ]
+   ```
+
+3. 创建数据表
+
+   1. 创建迁移文件
+
+      ```python
+      python manage.py makemigrations
+      ```
+
+      此举会在已经注册过的app的目录下生成migrations目录，其中存放的就是迁移文件。
+
+      迁移文件是啥东西呢？
+
+      **其实迁移文件就是方便我们的工程快速移动的。它记录了我们创建表、更改表字段的全过程。别人拿到这个迁移文件之后，只要执行migrate操作就能立刻创建出表结构。**
+
+   2. 执行迁移实际操作
+
+      `python manage.py migrate`
+
+   执行完了这两个步骤以后，我们的数据库表就建好了。可以用navicat看一下。
+
+   表名为app名_类小写名的即为我们自己写的表。其余的表是django免费赠送的。
+
+### DjangoORM单表修改表结构步骤
+
+我们的表结构并不是一成不变的。随着业务的改动，我们的表结构有可能也会跟着改动。
+
+修改表结构主要包含下面几种操作：
+
+- 新增表字段
+- 修改表字段
+- 删除表字段
+
+#### 新增表字段
+
+django在数据库迁移时，是不知道你数据库表中有没有数据的。所以在新增表字段的时候，它就会很疑惑要给之前存在的数据行(即记录)增加的新字段搞个什么样的值。
+
+**故，我们在进行新增表字段时，一定要制定一个default值。**
+
+示例：
+
+test_app/models.py
+
+```python
+from django.db import models
+
+class UserInfo(models.Model):
+    nid = models.BigAutoField(primary_key=True)
+    username = models.CharField(max_length=32)
+    password = models.CharField(max_length=64)
+
+    # 新增表字段示例
+    test_field = models.CharField(max_length=11, default='')
+```
+
+然后重新执行`python manage.py makemigrations` 和 `python manage.py migrate`即可。
+
+注意哈，改了表之后，都要执行一遍这两条命令，后面不再赘述。
+
+#### 修改表字段
+
+修改表字段包含两种情况。一种是给表字段改个名字，定义不变。
+
+一种是给表字段改个定义，名字不变。
+
+咦？你问我为什么不是两个都可以改变？？那不就成新增了么23333
+
+##### 给表字段改个定义，名字不变
+
+```python
+from django.db import models
+
+class UserInfo(models.Model):
+    nid = models.BigAutoField(primary_key=True)
+    username = models.CharField(max_length=32)
+    password = models.CharField(max_length=64)
+
+    # 修改表字段定义
+    test_field = models.IntegerField()
+```
+
+然后就正常生成表就好了。
+
+##### 给表字段改名字，定义不变
+
+```python
+from django.db import models
+
+class UserInfo(models.Model):
+    nid = models.BigAutoField(primary_key=True)
+    username = models.CharField(max_length=32)
+    password = models.CharField(max_length=64)
+
+    # 修改表字段名字
+    test_field1 = models.IntegerField()
+```
+
+并没有啥特别的，直接生成即可。
+
+#### 删除表字段
+
+```python
+from django.db import models
+
+class UserInfo(models.Model):
+    nnid = models.BigAutoField(primary_key=True)
+    username = models.CharField(max_length=32)
+    password = models.CharField(max_length=64)
+```
+
+直接删除即可。
+
+### DjangoORM单表CRUD操作
+
+#### 增
+
+增加有**两种**方式。
+
+一种是创建一行临时数据，最后保存的方式。(一行数据是一个对象，所以猜也能猜到怎么做) 。在创建对象的时候用参数的方式指定值就可以了。注意哈，这个方式为啥要用`tmp.save()`呢？因为这只是创建了一个对象，你得告诉ORM我修改完了你保存吧，怎么告诉？就是`tmp.save()`咯。
+
+```python
+from django.shortcuts import HttpResponse
+from .. import models
+def index(request):
+    tmp = models.UserInfo(username='tetetete', password='tetetetetete')
+    tmp.save()
+    return HttpResponse('OK')
+```
+
+
+
+另外一种是直接create.在create中用关键字参数的形式指定参数值就可以了。
+
+```python
+from django.shortcuts import HttpResponse
+from .. import models
+def index(request):
+    models.UserInfo.objects.create(username='dsadasd',password='dsadasdas')
+    return HttpResponse('OK')
+```
+
+#### 删
+
+删除分为范围删除和单个删除。不过操作上都是一样的。
+
+我们只需要在查询出来的单个对象上执行delete()，或者在查询出来的querySet上执行delete()。
+
+单个删除：
+
+```python
+from django.shortcuts import HttpResponse
+from .. import models
+def index(request):
+    models.UserInfo.objects.get(nid=1).delete()
+    return HttpResponse('OK')
+```
+
+多个删除：
+
+```python
+from django.shortcuts import HttpResponse
+from .. import models
+def index(request):
+    models.UserInfo.objects.filter(nid__gt=1).delete()
+    return HttpResponse('OK')
+```
+
+全部删除：
+
+```python
+from django.shortcuts import HttpResponse
+from .. import models
+def index(request):
+    models.UserInfo.objects.all().delete()
+    return HttpResponse('OK')
+```
+
+#### 改
+
+修改的话和删除类似，也是有全部更新，部分更新和单个更新之分。
+
+全部更新
+
+```python
+from django.shortcuts import HttpResponse
+from .. import models
+def index(request):
+    models.UserInfo.objects.all().update(username='test')
+    return HttpResponse('OK')
+```
+
+部分更新
+
+```python
+from django.shortcuts import HttpResponse
+from .. import models
+def index(request):
+    models.UserInfo.objects.filter(username='test').update(username='11111')
+    return HttpResponse('OK')
+```
+
+单个更新
+
+```python
+from django.shortcuts import HttpResponse
+from .. import models
+def index(request):
+    models.UserInfo.objects.filter(nid=1).update(username='nid1')
+    return HttpResponse('OK')
+```
+
+#### 查
+
+查询语句太多了，这里只列举最常用的。
+
+**非条件查询(把全表数据返回)**
+
+```python
+data = models.UserInfo.objects.all()
+```
+
+这里的data实际上是一个querySet对象，这是一个可迭代对象，我们可以认为这是个列表list。
+
+它之中的元素是一个个的UserInfo对象(就是查询的是哪个类，就是哪个类的对象呗，因为对象代表一行数据嘛)。
+
+这样的话会给我们带来处理上的麻烦，比如我们怎么转换成json数据传给前端？
+
+好办，想让querySet中的元素不是对象，只需要这样写：
+
+```python
+data = models.UserInfo.objects.all().values()
+```
+
+这样元素就是变成了一个个的字典，方便我们进行序列化。
+
+我们只需要把querySet转成list就可以方便的进行序列化了。
+
+当然我们也可以把元素变成元组，但我们一般不这么做。为了知识结构完整放在这儿。
+
+```python
+data = models.UserInfo.objects.all().values_list()
+```
+
+**非条件查询(全表数据返回，但只返回若干列的值)**
+
+```python
+data = models.UserInfo.objects.all().values('username','nid')
+```
+
+只需要这样写就能筛选想要的列了。
+
+**条件查询**
+
+```python
+from django.shortcuts import HttpResponse
+from .. import models
+def index(request):
+    data = models.UserInfo.objects.values('username','nid').filter(nid__gt=2, nid__lt=5)
+    print(list(data))
+    return HttpResponse('OK')
+```
+
+我们只需要把查询条件写在filter里就好了。filter中对于等于，直接写等于即可。
+
+对于大于，要在关键字参数名后面加双下划线__(神奇的双下划线)再加上gt(greater than)。小于是lt(lower than).
+
+多个关键字参数之间默认是与(and)的约束关系。对于or之类的关系，以后会说。
+
+注意哈，values和filter并没有先后次序之分。
+
+**只查询一条数据(记录)**
+
+```python
+from django.shortcuts import HttpResponse
+from .. import models
+def index(request):
+    data = models.UserInfo.objects.get(nid=1)
+    return HttpResponse('OK')
+```
+
+get中指定的是查询条件。当然啦，我们只查一个当然用主键比较好。
+
+get有啥用? 它一般用在要更新数据的时候，先查出来，查出来的是个对象，对这个对象修改数据之后save就完事儿了。
+
+#### 总结
+
+```python
+UserInfo.objects.all() # 拿到全部对象
+UserInfo.objects.filter(id=1, xx=2) # and 关系
+UserInfo.objects.all().first() # 取第一个结果
+UserInfo.objects.all().count() # 统计多少条数据
+UserInfo.objects.all().update() # 更新
+UserInfo.objects.all().delete() # 删除
+UserInfo.objects.all()[1:11] # 范围
+```
+
+
+
+### DjangoORM多表操作之一对多建表
+
+在**一**对**多**的表关系中，我们一般在**多**的一方设置一个**外键**。
+
+如果django确定这是两张新表建立了外键关系，那么事情就简单了。
+
+如果其中一张 or 两张表都不是新表，那么django就搞不清楚表中到底有没有数据，它需要给外键制定一个**默认值**，但是不能像普通字段一样用`default`指定。它必须用`null=True`来指定默认值为**null**. 
+
+
+
+两张新表一对多示例：
+
+```python
+from django.db import models
+
+# Create your models here.
+class ClassInfo(models.Model):
+    cid = models.BigAutoField(primary_key=True)
+    cname = models.CharField(max_length=32)
+
+class StuInfo(models.Model):
+    sid = models.BigAutoField(primary_key=True)
+    sname = models.CharField(max_length=32)
+    CI = models.ForeignKey('ClassInfo', on_delete=models.CASCADE)
+```
+
+我们执行makemigrations 和 migrate后，去看看数据库：
+
+我们会发现外键字段是CI_id。 没错这就是django帮我们干的事儿。CI_id用来存储外键。而代码里的CI，其实是一个对象，代表了ClassInfo的一行数据（即被StuInfo外键关联的数据）。
+
+我们再来看看两张非新表建立一对多关系的示例：
+
+```python
+from django.db import models
+# Create your models here.
+class UserInfo(models.Model):
+    user_id = models.BigAutoField(primary_key=True)
+    user_name = models.CharField(max_length=32)
+    ug = models.ForeignKey('UserGroup', on_delete=models.CASCADE, null=True)
+
+class UserGroup(models.Model):
+    group_id = models.BigAutoField(primary_key=True)
+    group_name = models.CharField(max_length=32)
+```
+
+### DjangoORM多表操作之一对多写数据
+
+```python
+from django.shortcuts import HttpResponse
+from django.views import View
+from .models import UserGroup, UserInfo
+# Create your views here.
+class CBV(View):
+    def get(self, request):
+        UserInfo.objects.create(user_name='testvth', ug_id=1)
+        return HttpResponse(200)
+```
+
+那么，用户哪知道ug_id应该传什么呢？
+
+好问题。在这种新增的时候，特别是外键的时候，我们一般会返回`UserGroup`表中的所有内容供用户选择，用户选择的`UserGroup`中的主键就代表了`ug_id`，因为这两个值是相同的。
+
+### DjangoORM多表操作之一对多查询
+
+诶？我们怎么用django进行连表查询来着？？即join那一套？
+
+没事djangoORM自带了这个功能。我们平时多表查询基本也都是用外键的方式，所以django提供了外键方式查询。
+
+#### 正向查询(查"多"中的数据，顺带把对应的外键信息也查出来)
+
+```python
+from django.shortcuts import HttpResponse
+from django.views import View
+from .models import UserGroup, UserInfo
+# Create your views here.
+class CBV(View):
+    def get(self, request):
+        datas = UserInfo.objects.all()
+        for item in datas:
+            # 对象方式跨表
+            print(item.user_id, item.user_name, item.ug_id, item.ug.group_name)
+        return HttpResponse(200)
+```
+
+我们直接点，就能拿到UserGroup中的数据了，因为ug代表了UserGroup的一个对象(即一条记录)嘛。
+
+**那不能像mysql一样直接就可以返回拼接好的数据嘛？这是查出来还要自己负责拼接？**
+
+不用，哪有这么麻烦，别忘了还有神奇的双下划线。
+
+```python
+from django.shortcuts import HttpResponse
+from django.views import View
+from .models import UserGroup, UserInfo
+# Create your views here.
+class CBV(View):
+    def get(self, request):
+        # values方式跨表
+        print(UserInfo.objects.all().values('user_name', 'ug__group_name'))
+        return HttpResponse(200)
+```
+
+使用方法：只需要用`外键成员__对应的表中的成员名`就可以访问了。
+
+#### 反向查询
+
+反向查询即通过查询**一对多**中**一**的部分，把**跟他关联的多的部分的数据**都给查出来。
+
+```python
+from django.shortcuts import HttpResponse
+from django.views import View
+from .models import UserGroup, UserInfo
+# Create your views here.
+class CBV(View):
+    def get(self, request):
+        datas = UserGroup.objects.all()
+        data = datas.first()
+        # 对象方式跨表
+        print(data.userinfo_set.values())
+        return HttpResponse(200)
+```
+
+总结一下，就是`对象.关联表小写+下划线+set`相当于是一个querySet，其中的元素是与本对象有外键关联的UserInfo对象。
+
+用values跨表：
+
+```python
+from django.shortcuts import HttpResponse
+from django.views import View
+from .models import UserGroup, UserInfo
+# Create your views here.
+class CBV(View):
+    def get(self, request):
+        print(UserGroup.objects.values('group_name', 'userinfo__user_name'))
+        return HttpResponse(200)
+```
+
+即跨表时使用的是`另外一个表的小写表名__字段`
+
+#### 跨表总结
+
+django中的一对多跨表，其实就是个**left join**。 谁在前面谁就是left(以谁为基准)。
+
+
+
+### DjangoORM补充
+
+#### 排序
+
+```python
+from django.shortcuts import HttpResponse
+from django.views import View
+from .models import UserGroup, UserInfo
+# Create your views here.
+class CBV(View):
+    def get(self, request):
+        # 直接在这儿
+        # 按group_name正序
+        print(UserGroup.objects.values('group_name').order_by('group_name'))
+        # 按group_name逆序 - 注意一下逆序的写法
+        print(UserGroup.objects.values('group_name').order_by('-group_name'))
+        return HttpResponse(200)
+```
+
+#### 分组
+
+`django.db.models`中有聚合函数，分别为`Count, Max, Min, Sum` 
+
+分组要用`annotate`方法，即annotate方法相当于`goup_by`.这里`values`起到的作用是指定了按什么分组，这个例子是按`ug_id`进行分组的。`x`相当于是给`count`这个聚合函数查出来的结果起了个别名。
+
+```python
+from django.shortcuts import HttpResponse
+from django.views import View
+from .models import UserGroup, UserInfo
+from django.db.models import Count, Max, Min, Sum
+# Create your views here.
+class CBV(View):
+    def get(self, request):
+        # 
+        print(UserInfo.objects.values('ug_id').annotate(x=Count('user_id')))
+        return HttpResponse(200)
+```
+
+补充一点，我们写的`djangoORM`，可以让他展现出生成的`sql`语句是啥样的，只需要在后面点出来`query`属性。
+
+比如这样：
+
+```python
+from django.shortcuts import HttpResponse
+from django.views import View
+from .models import UserGroup, UserInfo
+from django.db.models import Count, Max, Min, Sum
+# Create your views here.
+class CBV(View):
+    def get(self, request):
+        print(UserInfo.objects.values('ug_id').annotate(x=Count('user_id')).query)
+        return HttpResponse(200)
+```
+
+
+
+另外再补充一点，在`djangoORM`的世界里，`filter()`被当成了`where`和`having`来使用。具体是被当成啥，要看用`filter`的时机。 `filter`用在`annotate`之前(或者语句中根本没有出现`annotate`)， 则是`where`。用在`annotate`之后，则是`having`。
+
+```python
+from django.shortcuts import HttpResponse
+from django.views import View
+from .models import UserGroup, UserInfo
+from django.db.models import Count, Max, Min, Sum
+# Create your views here.
+class CBV(View):
+    def get(self, request):
+        # 相当于having了。
+        print(UserInfo.objects.values('ug_id').annotate(x=Count(
+            'user_id')).filter(x__gt=1))
+        return HttpResponse(200)
+```
+
+#### filter详解
+
+```python
+from django.shortcuts import HttpResponse
+from django.views import View
+from .models import UserGroup, UserInfo
+from django.db.models import Count, Max, Min, Sum
+# Create your views here.
+class CBV(View):
+    def get(self, request):
+        # 大于1
+        print(UserInfo.objects.filter(user_id__gt=1))
+        # 小于1
+        print(UserInfo.objects.filter(user_id__lt=1))
+        # 小于等于1
+        print(UserInfo.objects.filter(user_id__lte=1))
+        # 大于等于1
+        print(UserInfo.objects.filter(user_id__gte=1))
+        # 等于1或者2或者3均可
+        print(UserInfo.objects.filter(user_id__in=[1,2,3]))
+        # 大于等于1小于等于2
+        print(UserInfo.objects.filter(user_id__range=[1,2]))
+        # 查找以test开头的
+        print(UserInfo.objects.filter(user_name__startswith='test'))
+        # 查找以vth结尾的
+        print(UserInfo.objects.filter(user_name__endswith='vth'))
+        # 查找包含P的
+        print(UserInfo.objects.filter(user_name__contains='P'))
+        # 对filter取反(意思就是取出所有不符合条件的)
+        print(UserInfo.objects.exclude(user_name__contains='P'))
+        return HttpResponse(200)
+```
+
+#### F
+
+试想一下，我们如果要对所有人或者是部分人的年龄+1, 怎么破？
+
+如果是单个人，根据主键id查出来这个对象，对对象修改然后save就行了。
+
+如果多个人呢？我们能这么写吗？循环不累吗？python性能很高吗能扛得住这么写吗？
+
+灵机一动：
+
+```python
+from django.shortcuts import HttpResponse
+from django.views import View
+from .models import UserGroup, UserInfo
+from django.db.models import Count, Max, Min, Sum, F
+# Create your views here.
+class CBV(View):
+    def get(self, request):
+        UserInfo.objects.all().update(user_age=user_age+1)
+        
+```
+
+这样是行不通的，user_age是个参数的命名传递，当前方法下面没有这玩意儿啊。
+
+现在问题转化成了，我们要怎么才能让'user_age'是数据库里的'user_age'呢，换句话说，要怎么样才能合法的使用这样的语法呢？
+
+怎么才能如我所愿？F!
+
+```python
+from django.shortcuts import HttpResponse
+from django.views import View
+from .models import UserGroup, UserInfo
+from django.db.models import Count, Max, Min, Sum, F
+# Create your views here.
+class CBV(View):
+    def get(self, request):
+        # 解决方案
+        print(UserInfo.objects.all().update(user_age=F('user_age')+1))
+        return HttpResponse(200)
+```
+
+注意，F也是有弱点的。**F当前只能用加减乘除取余等运算**。换句话说，它只适合处理数字型的值，处理其他值会报错。
+
+#### Q
+
+Q是用于构造复杂的查询条件的。
+
+前面我们说过filter的特点，多个参数之间的关系被写死了是and关系，Q就是用来解决这个问题(即复杂的查询条件的问题)的。
+
+Q的简单使用：
+
+```python
+from django.shortcuts import HttpResponse
+from django.views import View
+from .models import UserGroup, UserInfo
+from django.db.models import Count, Max, Min, Sum, F, Q
+# Create your views here.
+class CBV(View):
+    def get(self, request):
+        # 相当于没写Q
+        print(UserInfo.objects.filter(Q(user_id=1)).values())
+        # 通过Q的封装，变成了或
+        print(UserInfo.objects.filter(Q(user_id=1) | Q(user_name__endswith='cxz')).values())
+        # 通过Q的封装，变成了与(脱裤子放屁，直接写filter里更香)
+        print(UserInfo.objects.filter(Q(user_id=1) & Q(user_name__endswith='cxz')).values())
+        return HttpResponse(200)
+```
+
+如果想这样拼装，没有函数式编程经验的你可能会懵逼，Q还提供了另外一种拼装方式。
+
+```python
+from django.shortcuts import HttpResponse
+from django.views import View
+from .models import UserGroup, UserInfo
+from django.db.models import Count, Max, Min, Sum, F, Q
+# Create your views here.
+class CBV(View):
+    def get(self, request):
+        # Q的组合容器。可以认为Q是个递归似的玩意儿
+        condition = Q()
+
+        # q1
+        q1 = Q()
+        # 设置q1的内部连接规则，这里选择的是OR
+        q1.connector = q1.OR
+        # 添加的元素是一个个的元组
+        q1.children.append(('user_id__gt', 1))
+        q1.children.append(('user_id__lte',1))
+
+        q2 = Q()
+        # 设置q2的内部连接规则，这里选择的是AND
+        q2.connector = Q.AND
+        q2.children.append(('user_name__startswith', 'vth'))
+        q2.children.append(('user_name__endswith', 'cxz'))
+
+        # 设置q1和q2的连接规则
+        # Q.AND是把q1当成一个整体
+        condition.add(q1, Q.AND)
+        # Q.OR代表了q2这个整体和q1的关系
+        condition.add(q2, Q.OR)
+
+        print(UserInfo.objects.filter(condition).query)
+        return HttpResponse(200)
+```
+
+当然啦，对于高层封装的Q，其中元素也为Q的对象的时候，尽量都用and，这样统一起来比较好。
+
+## Django视图
+
+django的视图分为CBV和FBV。
+
+所谓的FBV是指处理业务逻辑的是函数，而CBV就是说我们把业务逻辑写在了类中。
+
+### FBV
+
+```python
+# test_app/urls.py
+from django.urls import path
+from .views.index import index
+urlpatterns = [
+    path('index/2', index)
+]
+```
+
+```python
+# test_app/views/index.py
+from django.shortcuts import HttpResponse
+from .. import models
+def index(request):
+    models.UserInfo.objects.filter(nid=1).update(username='nid1')
+    return HttpResponse('OK')
+```
+
+我们可以看到，此时写在path中的是个视图函数。而且我们的实现方式是在index.py中直接定义的一个函数。
+
+### CBV
+
+1. CBV在实现时，在视图函数所在的文件中应写成一个类的形式，该类需要继承自`django.views.View`类。
+2. 在这个类中要实现`HTTP`协议的方法对应的小写的方法。比如处理`get`请求的方法我们也要定义为`get`.
+3. 在`urls.py`中的`path`里，不能直接写类名，要写`类名.as_view()`
+4. HTTP协议支持的方法：'get', 'post', 'put', 'patch', 'delete', 'head', 'options', 'trace'
+5. View中的逻辑是这样的，一执行as_view()方法，它会返回一个叫view的函数。这个函数会调用dispatch方法，而dispatch方法会通过反射的形式，调用我们写的业务逻辑，然后接收我们业务逻辑的返回值，然后dispatch、view一层层往上返回，最终返回给前端。
+
+```python
+# test_app/urls.py
+from django.urls import path
+from .views.index import CBVTest
+urlpatterns = [
+    path('index/2', CBVTest.as_view())
+]
+```
+
+```python
+# test_app/views/index.py
+from django.shortcuts import HttpResponse
+from django.views import View
+from .. import models
+
+class CBVTest(View):
+    def get(self,request):
+        return HttpResponse('get completed.')
+```
+
+既然业务逻辑的入口和出口都在dispatch方法，那么我们可以重写dispatch方法来做到类似于装饰器的功能。
+
+```python
+from django.shortcuts import HttpResponse
+from django.views import View
+from .. import models
+
+class CBVTest(View):
+    def get(self,request):
+        return HttpResponse('get completed.')
+
+    def dispatch(self, request, *args, **kwargs):
+        # before exec to do something
+        res = super(CBVTest, self).dispatch(request, *args, **kwargs)
+        # after exec to do something
+        return res
+```
+
+### Django分页
+
+占个坑，目前用不到，写完论文再学。
